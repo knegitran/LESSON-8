@@ -1,9 +1,18 @@
+:root {
+  --neon-pink: #ff2bd6;
+  --neon-orange: #ff5e00;
+  --neon-green: #39ff14;
+  --dashboard-bg: #000000;
+  --panel-bg: rgba(18, 19, 26, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.1);
+}
+
 html,
 body,
 #app {
   margin: 0;
   min-height: 100%;
-  background: #020817;
+  background: var(--dashboard-bg);
   color: #e2e8f0;
   font-family: 'Inter', 'Segoe UI', sans-serif;
 }
@@ -17,7 +26,8 @@ body {
 }
 
 .v-application {
-  background: #020817;
+  background: var(--dashboard-bg);
+  color: #f4e8ef;
 }
 
 .dashboard-shell {
@@ -25,8 +35,16 @@ body {
   padding: 22px 20px 32px;
 }
 
+.dashboard-shell > .text-body-1 {
+  color: #f4dce9 !important;
+}
+
 .border-b {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  border-bottom: 1px solid rgba(255, 43, 214, 0.28);
+}
+
+.dashboard-app-bar .text-h5 {
+  color: #190014;
 }
 
 .month-picker {
@@ -35,8 +53,8 @@ body {
 
 .metric-card,
 .chart-card {
-  background: rgba(15, 23, 42, 0.84) !important;
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: var(--panel-bg) !important;
+  border: 1px solid var(--panel-border);
   box-shadow: none !important;
 }
 
@@ -55,15 +73,21 @@ body {
 }
 
 .metric-trend.positive {
-  color: #4ade80;
+  color: var(--neon-green);
 }
 
 .metric-trend.negative {
-  color: #f87171;
+  color: var(--neon-pink);
 }
 
 .chart-card {
   min-height: 220px;
+  max-height: 600px;
+  overflow: hidden;
+}
+
+.chart-card canvas {
+  max-height: 540px;
 }
 
 .large-chart {

@@ -10,6 +10,7 @@ import {
   LineElement,
   LinearScale,
   PointElement,
+  type ScriptableContext,
   Title,
   Tooltip,
 } from 'chart.js'
@@ -70,6 +71,22 @@ const formatNumber = (value: number) =>
 
 const formatPercent = (value: number) => `${value.toFixed(1)}%`
 
+const formatAxisValue = (value: number, type: 'currency' | 'number' | 'percent' = 'number') => {
+  if (type === 'currency') {
+    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`
+    if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`
+    return `$${value.toFixed(0)}`
+  }
+
+  if (type === 'percent') {
+    return `${value.toFixed(0)}%`
+  }
+
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`
+  return `${value.toFixed(0)}`
+}
+
 const summaryCards = computed(() => {
   const yearlyRevenueAverage = data.reduce((sum, item) => sum + item.revenue, 0) / data.length
   const yearlyVisitorsAverage = data.reduce((sum, item) => sum + item.visitors, 0) / data.length
@@ -125,6 +142,18 @@ const summaryCards = computed(() => {
   ]
 })
 
+const createPinkGradient = (context: ScriptableContext<'line'>) => {
+  const { chart } = context
+  const { chartArea } = chart
+  if (!chartArea) return 'rgba(255, 43, 214, 0.12)'
+
+  const gradient = chart.ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top)
+  gradient.addColorStop(0, 'rgba(255, 43, 214, 0.02)')
+  gradient.addColorStop(0.55, 'rgba(255, 91, 226, 0.12)')
+  gradient.addColorStop(1, 'rgba(255, 135, 238, 0.26)')
+  return gradient
+}
+
 const revenueChartData = computed(() => {
   const labels = selectedMonth.value === 'ALL' ? data.map((item) => item.month) : [currentMonthEntry.value?.month ?? '']
   const values = selectedMonth.value === 'ALL'
@@ -138,9 +167,11 @@ const revenueChartData = computed(() => {
         label: 'Revenue',
         data: values,
         backgroundColor: selectedMonth.value === 'ALL'
-          ? ['#2dd4bf', '#34d399', '#5eead4', '#86efac', '#a7f3d0', '#d1fae5', '#34d399', '#2dd4bf', '#6ee7b7', '#4ade80', '#10b981', '#14b8a6']
-          : ['#2dd4bf'],
+          ? ['#8f005d', '#ff2bd6', '#c000a8', '#ff70e8', '#a60069', '#e600b8', '#ff9af0', '#b0008b', '#f51ccf', '#d40072', '#ff4dce', '#7a005f']
+          : ['#ff2bd6'],
         borderRadius: 10,
+        borderColor: '#170014',
+        borderWidth: 1,
       },
     ],
   }
@@ -158,8 +189,8 @@ const visitorsChartData = computed(() => {
       {
         label: 'Visitors',
         data: values,
-        borderColor: '#8b5cf6',
-        backgroundColor: 'rgba(139, 92, 246, 0.12)',
+        borderColor: '#ff2bd6',
+        backgroundColor: createPinkGradient,
         fill: true,
         tension: 0.4,
       },
@@ -177,8 +208,8 @@ const conversionsChartData = computed(() => {
       {
         label: 'Conversions',
         data: selectedMonth.value === 'ALL' ? values : [(currentMonthEntry.value?.conversions ?? 0)],
-        borderColor: '#fbbf24',
-        backgroundColor: 'rgba(251, 191, 36, 0.18)',
+        borderColor: '#ff83ed',
+        backgroundColor: createPinkGradient,
         fill: true,
         tension: 0.45,
       },
@@ -186,7 +217,7 @@ const conversionsChartData = computed(() => {
   }
 })
 
-const chartOptions = {
+const createChartOptions = (axisType: 'currency' | 'number' | 'percent' = 'number') => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -207,18 +238,26 @@ const chartOptions = {
     },
     y: {
       grid: { color: 'rgba(148, 163, 184, 0.14)' },
-      ticks: { color: '#cbd5e1', maxTicksLimit: 5 },
+      ticks: {
+        color: '#cbd5e1',
+        maxTicksLimit: 5,
+        callback: (value: string | number) => formatAxisValue(Number(value), axisType),
+      },
       beginAtZero: false,
     },
   },
-}
+})
+
+const revenueChartOptions = createChartOptions('currency')
+const visitorsChartOptions = createChartOptions('number')
+const conversionsChartOptions = createChartOptions('percent')
 
 const selectedLabel = computed(() => selectedMonth.value === 'ALL' ? 'All months' : selectedMonth.value)
 </script>
 
 <template>
   <v-app>
-    <v-app-bar color="#0f172a" flat class="border-b" height="80">
+    <v-app-bar color="#ff2bd6" flat class="border-b dashboard-app-bar" height="80">
       <v-container class="d-flex align-center px-4" fluid>
         <div class="text-h5 font-weight-bold">My Dashboard</div>
         <v-spacer />
@@ -263,14 +302,14 @@ const selectedLabel = computed(() => selectedMonth.value === 'ALL' ? 'All months
           <v-col cols="12" md="6">
             <v-card class="rounded-xl pa-3 chart-card" elevation="0">
               <v-card-title class="px-0 pb-2">Revenue</v-card-title>
-              <Bar :data="revenueChartData" :options="chartOptions" />
+              <Bar :data="revenueChartData" :options="revenueChartOptions" />
             </v-card>
           </v-col>
 
           <v-col cols="12" md="6">
             <v-card class="rounded-xl pa-3 chart-card" elevation="0">
               <v-card-title class="px-0 pb-2">Visitors</v-card-title>
-              <Line :data="visitorsChartData" :options="chartOptions" />
+              <Line :data="visitorsChartData" :options="visitorsChartOptions" />
             </v-card>
           </v-col>
         </v-row>
@@ -279,7 +318,7 @@ const selectedLabel = computed(() => selectedMonth.value === 'ALL' ? 'All months
           <v-col cols="12">
             <v-card class="rounded-xl pa-3 chart-card large-chart" elevation="0">
               <v-card-title class="px-0 pb-2">Conversions</v-card-title>
-              <Line :data="conversionsChartData" :options="chartOptions" />
+              <Line :data="conversionsChartData" :options="conversionsChartOptions" />
             </v-card>
           </v-col>
         </v-row>
