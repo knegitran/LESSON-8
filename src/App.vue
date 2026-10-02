@@ -11,317 +11,401 @@ import {
   LinearScale,
   PointElement,
   type ScriptableContext,
-  Title,
   Tooltip,
 } from 'chart.js'
-import metrics from './data/metrics.json'
+import logistics from './data/logistics.json'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, Filler)
+ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Tooltip, Legend, Filler)
 
-type MetricEntry = {
+type RegionName = 'Northeast' | 'Central' | 'South' | 'West'
+type RegionMetrics = {
+  shipments: number
+  delivered: number
+  onTime: number
+  transitDaysTotal: number
+}
+type LogisticsMonth = {
   month: string
-  revenue: number
-  visitors: number
-  conversions: number
-  orders: number
+  year: number
+  regions: Record<RegionName, RegionMetrics>
+}
+type ExceptionRecord = {
+  id: string
+  shipmentId: string
+  region: RegionName
+  issueType: string
+  priority: 'Critical' | 'High' | 'Medium' | 'Low'
+  ageDays: number
+  status: 'Open' | 'Investigating' | 'Monitoring' | 'Resolved'
+  openedMonth: string
+}
+type LogisticsData = {
+  regions: RegionName[]
+  months: LogisticsMonth[]
+  exceptions: ExceptionRecord[]
 }
 
-const data = metrics as MetricEntry[]
-const selectedMonth = ref('ALL')
+const dataset = logistics as LogisticsData
+const selectedPeriod = ref('ALL')
+const selectedRegion = ref<'ALL' | RegionName>('ALL')
+const exceptionSort = ref<'priority' | 'age'>('priority')
+const emptyMetrics = (): RegionMetrics => ({ shipments: 0, delivered: 0, onTime: 0, transitDaysTotal: 0 })
+const numberFormat = new Intl.NumberFormat('en-US')
+const formatNumber = (value: number) => numberFormat.format(value)
+const formatPercent = (value: number) => `${value.toFixed(1)}%`
+const formatRateDelta = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} pp`
 
-const monthOptions = [
-  { title: 'All months', value: 'ALL' },
-  ...data.map((item) => ({ title: item.month, value: item.month })),
+const periodOptions = [
+  { title: 'All periods · 2025', value: 'ALL' },
+  ...dataset.months.map((item) => ({ title: `${item.month} ${item.year}`, value: item.month })),
+]
+const regionOptions = [
+  { title: 'All regions', value: 'ALL' },
+  ...dataset.regions.map((region) => ({ title: region, value: region })),
+]
+const sortOptions = [
+  { title: 'Priority first', value: 'priority' },
+  { title: 'Oldest first', value: 'age' },
 ]
 
-const currentMonthEntry = computed(() => {
-  if (selectedMonth.value === 'ALL') return null
-  return data.find((item) => item.month === selectedMonth.value) ?? null
+const visibleMonths = computed(() => selectedPeriod.value === 'ALL'
+  ? dataset.months
+  : dataset.months.filter((item) => item.month === selectedPeriod.value))
+
+const sumMetrics = (months: LogisticsMonth[], region = selectedRegion.value) => months.reduce((totals, item) => {
+  const regionRows = region === 'ALL' ? Object.values(item.regions) : [item.regions[region]]
+  for (const row of regionRows) {
+    totals.shipments += row.shipments
+    totals.delivered += row.delivered
+    totals.onTime += row.onTime
+    totals.transitDaysTotal += row.transitDaysTotal
+  }
+  return totals
+}, emptyMetrics())
+
+const currentMetrics = computed(() => sumMetrics(visibleMonths.value))
+const previousMonth = computed(() => {
+  if (selectedPeriod.value === 'ALL') return null
+  const index = dataset.months.findIndex((item) => item.month === selectedPeriod.value)
+  return index > 0 ? dataset.months[index - 1] : null
+})
+const previousMetrics = computed(() => previousMonth.value ? sumMetrics([previousMonth.value]) : null)
+
+const filteredExceptions = computed(() => {
+  const matches = dataset.exceptions.filter((item) =>
+    item.status !== 'Resolved'
+    && (selectedPeriod.value === 'ALL' || item.openedMonth === selectedPeriod.value)
+    && (selectedRegion.value === 'ALL' || item.region === selectedRegion.value),
+  )
+
+  const priorityRank: Record<ExceptionRecord['priority'], number> = { Critical: 4, High: 3, Medium: 2, Low: 1 }
+  return [...matches].sort((first, second) => exceptionSort.value === 'priority'
+    ? priorityRank[second.priority] - priorityRank[first.priority] || second.ageDays - first.ageDays
+    : second.ageDays - first.ageDays)
 })
 
-const previousMonthEntry = computed(() => {
-  if (selectedMonth.value === 'ALL') {
-    return data[data.length - 2] ?? data[data.length - 1]
-  }
+const countOpenExceptions = (month?: string) => dataset.exceptions.filter((item) =>
+  item.status !== 'Resolved'
+  && (month === undefined || item.openedMonth === month)
+  && (selectedRegion.value === 'ALL' || item.region === selectedRegion.value),
+).length
 
-  const index = data.findIndex((item) => item.month === selectedMonth.value)
-  return data[index - 1] ?? data[0]
-})
+const priorityExceptionCount = computed(() => filteredExceptions.value.filter((item) =>
+  item.priority === 'Critical' || item.priority === 'High',
+).length)
 
-const getChangePercent = (current: number, previous: number) => {
-  if (!previous) return 0
-  return ((current - previous) / previous) * 100
-}
+const comparisonText = computed<string[]>(() => {
+  if (selectedPeriod.value === 'ALL') return ['', '', '', '']
+  if (!previousMetrics.value) return Array(4).fill('No previous month in sample')
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(value)
-
-const formatCompactCurrency = (value: number) => {
-  if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`
-  if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`
-  return `$${value.toFixed(0)}`
-}
-
-const formatNumber = (value: number) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
-
-const formatPercent = (value: number) => `${value.toFixed(1)}%`
-
-const formatAxisValue = (value: number, type: 'currency' | 'number' | 'percent' = 'number') => {
-  if (type === 'currency') {
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`
-    if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`
-    return `$${value.toFixed(0)}`
-  }
-
-  if (type === 'percent') {
-    return `${value.toFixed(0)}%`
-  }
-
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`
-  return `${value.toFixed(0)}`
-}
-
-const summaryCards = computed(() => {
-  const yearlyRevenueAverage = data.reduce((sum, item) => sum + item.revenue, 0) / data.length
-  const yearlyVisitorsAverage = data.reduce((sum, item) => sum + item.visitors, 0) / data.length
-  const yearlyConversionsAverage = data.reduce((sum, item) => sum + item.conversions, 0) / data.length
-  const yearlyOrdersAverage = data.reduce((sum, item) => sum + item.orders, 0) / data.length
-
-  const currentRevenue = selectedMonth.value === 'ALL' ? yearlyRevenueAverage : currentMonthEntry.value?.revenue ?? 0
-  const currentVisitors = selectedMonth.value === 'ALL' ? yearlyVisitorsAverage : currentMonthEntry.value?.visitors ?? 0
-  const currentConversions = selectedMonth.value === 'ALL' ? yearlyConversionsAverage : currentMonthEntry.value?.conversions ?? 0
-  const currentOrders = selectedMonth.value === 'ALL' ? yearlyOrdersAverage : currentMonthEntry.value?.orders ?? 0
+  const previous = previousMetrics.value
+  const current = currentMetrics.value
+  const previousRate = previous.delivered ? (previous.onTime / previous.delivered) * 100 : 0
+  const currentRate = current.delivered ? (current.onTime / current.delivered) * 100 : 0
+  const previousTransit = previous.delivered ? previous.transitDaysTotal / previous.delivered : 0
+  const currentTransit = current.delivered ? current.transitDaysTotal / current.delivered : 0
+  const shipmentDelta = previous.shipments ? ((current.shipments - previous.shipments) / previous.shipments) * 100 : 0
+  const transitDelta = currentTransit - previousTransit
 
   return [
-    {
-      label: 'Revenue',
-      value: selectedMonth.value === 'ALL' ? formatCompactCurrency(currentRevenue) : formatCurrency(currentRevenue),
-      delta: getChangePercent(
-        currentRevenue,
-        selectedMonth.value === 'ALL' ? data[data.length - 2]?.revenue ?? currentRevenue : previousMonthEntry.value?.revenue ?? currentRevenue,
-      ),
-      icon: 'mdi-currency-usd',
-      color: 'success',
-    },
-    {
-      label: 'Visitors',
-      value: formatNumber(currentVisitors),
-      delta: getChangePercent(
-        currentVisitors,
-        selectedMonth.value === 'ALL' ? data[data.length - 2]?.visitors ?? currentVisitors : previousMonthEntry.value?.visitors ?? currentVisitors,
-      ),
-      icon: 'mdi-account-group',
-      color: 'info',
-    },
-    {
-      label: 'Conversions',
-      value: formatPercent(currentConversions),
-      delta: getChangePercent(
-        currentConversions,
-        selectedMonth.value === 'ALL' ? data[data.length - 2]?.conversions ?? currentConversions : previousMonthEntry.value?.conversions ?? currentConversions,
-      ),
-      icon: 'mdi-trending-up',
-      color: 'primary',
-    },
-    {
-      label: 'Orders',
-      value: formatNumber(currentOrders),
-      delta: getChangePercent(
-        currentOrders,
-        selectedMonth.value === 'ALL' ? data[data.length - 2]?.orders ?? currentOrders : previousMonthEntry.value?.orders ?? currentOrders,
-      ),
-      icon: 'mdi-bag-check',
-      color: 'warning',
-    },
+    `${shipmentDelta > 0 ? '+' : ''}${shipmentDelta.toFixed(1)}% shipments vs prior month`,
+    `${formatRateDelta(currentRate - previousRate)} vs prior month`,
+    `${countOpenExceptions(selectedPeriod.value)} currently unresolved · opened this month`,
+    `${transitDelta > 0 ? '+' : ''}${transitDelta.toFixed(1)} days vs prior month`,
   ]
 })
 
-const createPinkGradient = (context: ScriptableContext<'line'>) => {
-  const { chart } = context
-  const { chartArea } = chart
-  if (!chartArea) return 'rgba(255, 43, 214, 0.12)'
+const summaryCards = computed(() => {
+  const totals = currentMetrics.value
+  const onTimeRate = totals.delivered ? (totals.onTime / totals.delivered) * 100 : 0
+  const averageTransit = totals.delivered ? totals.transitDaysTotal / totals.delivered : 0
+  const exceptionCount = filteredExceptions.value.length
+  const allPeriodDetails = [
+    '12-month network total',
+    `${formatNumber(totals.delivered)} deliveries counted`,
+    `${priorityExceptionCount.value} high-priority items · active snapshot`,
+    `${formatNumber(totals.delivered)} completed shipments`,
+  ]
 
-  const gradient = chart.ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top)
-  gradient.addColorStop(0, 'rgba(255, 43, 214, 0.02)')
-  gradient.addColorStop(0.55, 'rgba(255, 91, 226, 0.12)')
-  gradient.addColorStop(1, 'rgba(255, 135, 238, 0.26)')
-  return gradient
-}
-
-const revenueChartData = computed(() => {
-  const labels = selectedMonth.value === 'ALL' ? data.map((item) => item.month) : [currentMonthEntry.value?.month ?? '']
-  const values = selectedMonth.value === 'ALL'
-    ? data.map((item) => item.revenue)
-    : [currentMonthEntry.value?.revenue ?? 0]
-
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'Revenue',
-        data: values,
-        backgroundColor: selectedMonth.value === 'ALL'
-          ? ['#8f005d', '#ff2bd6', '#c000a8', '#ff70e8', '#a60069', '#e600b8', '#ff9af0', '#b0008b', '#f51ccf', '#d40072', '#ff4dce', '#7a005f']
-          : ['#ff2bd6'],
-        borderRadius: 10,
-        borderColor: '#170014',
-        borderWidth: 1,
-      },
-    ],
-  }
+  return [
+    { label: 'Shipments', value: formatNumber(totals.shipments), detail: selectedPeriod.value === 'ALL' ? allPeriodDetails[0] : comparisonText.value[0], icon: 'mdi-truck-fast-outline', accent: 'pink' },
+    { label: 'On-time delivery', value: formatPercent(onTimeRate), detail: selectedPeriod.value === 'ALL' ? allPeriodDetails[1] : comparisonText.value[1], icon: 'mdi-clock-check-outline', accent: 'green' },
+    { label: 'Open exceptions', value: formatNumber(exceptionCount), detail: selectedPeriod.value === 'ALL' ? allPeriodDetails[2] : `${priorityExceptionCount.value} high priority · opened ${selectedPeriod.value}`, icon: 'mdi-alert-circle-outline', accent: 'orange' },
+    { label: 'Average transit', value: `${averageTransit.toFixed(1)} days`, detail: selectedPeriod.value === 'ALL' ? allPeriodDetails[3] : comparisonText.value[3], icon: 'mdi-timer-sand', accent: 'violet' },
+  ]
 })
 
-const visitorsChartData = computed(() => {
-  const labels = selectedMonth.value === 'ALL' ? data.map((item) => item.month) : [currentMonthEntry.value?.month ?? '']
-  const values = selectedMonth.value === 'ALL'
-    ? data.map((item) => item.visitors)
-    : [currentMonthEntry.value?.visitors ?? 0]
+const monthTotals = computed(() => visibleMonths.value.map((item) => ({
+  month: item.month,
+  ...sumMetrics([item]),
+})))
 
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'Visitors',
-        data: values,
-        borderColor: '#ff2bd6',
-        backgroundColor: createPinkGradient,
-        fill: true,
-        tension: 0.4,
-      },
-    ],
-  }
-})
+const shipmentChartData = computed(() => ({
+  labels: monthTotals.value.map((item) => item.month),
+  datasets: [{
+    label: 'Shipments',
+    data: monthTotals.value.map((item) => item.shipments),
+    backgroundColor: ['#8f005d', '#ff2bd6', '#c000a8', '#ff70e8', '#a60069', '#e600b8', '#ff9af0', '#b0008b', '#f51ccf', '#d40072', '#ff4dce', '#7a005f'],
+    borderColor: '#170014',
+    borderWidth: 1,
+    borderRadius: 5,
+    maxBarThickness: 34,
+  }],
+}))
 
-const conversionsChartData = computed(() => {
-  const labels = data.map((item) => item.month)
-  const values = data.map((item) => item.conversions)
+const onTimeChartData = computed(() => ({
+  labels: monthTotals.value.map((item) => item.month),
+  datasets: [{
+    label: 'On-time delivery',
+    data: monthTotals.value.map((item) => item.delivered ? (item.onTime / item.delivered) * 100 : 0),
+    borderColor: '#ff2bd6',
+    backgroundColor: (context: ScriptableContext<'line'>) => {
+      const { chart } = context
+      if (!chart.chartArea) return 'rgba(255, 43, 214, 0.12)'
+      const gradient = chart.ctx.createLinearGradient(0, chart.chartArea.bottom, 0, chart.chartArea.top)
+      gradient.addColorStop(0, 'rgba(255, 43, 214, 0.01)')
+      gradient.addColorStop(1, 'rgba(255, 43, 214, 0.2)')
+      return gradient
+    },
+    fill: true,
+    tension: 0.35,
+    pointRadius: 3,
+    pointHoverRadius: 5,
+    pointBackgroundColor: '#ff9af0',
+    pointBorderColor: '#08090d',
+    pointBorderWidth: 2,
+  }],
+}))
 
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'Conversions',
-        data: selectedMonth.value === 'ALL' ? values : [(currentMonthEntry.value?.conversions ?? 0)],
-        borderColor: '#ff83ed',
-        backgroundColor: createPinkGradient,
-        fill: true,
-        tension: 0.45,
-      },
-    ],
-  }
-})
+const regionPerformance = computed(() => dataset.regions
+  .filter((region) => selectedRegion.value === 'ALL' || region === selectedRegion.value)
+  .map((region) => {
+    const totals = sumMetrics(visibleMonths.value, region)
+    return {
+      name: region,
+      ...totals,
+      onTimeRate: totals.delivered ? (totals.onTime / totals.delivered) * 100 : 0,
+    }
+  }))
+const maxRegionShipments = computed(() => Math.max(...regionPerformance.value.map((item) => item.shipments), 1))
 
-const createChartOptions = (axisType: 'currency' | 'number' | 'percent' = 'number') => ({
+const createChartOptions = (kind: 'number' | 'percent') => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
     legend: { display: false },
+    tooltip: { displayColors: false },
   },
-  layout: {
-    padding: {
-      top: 8,
-      right: 8,
-      bottom: 0,
-      left: 0,
-    },
-  },
+  layout: { padding: { top: 6, right: 8, bottom: 0, left: 0 } },
   scales: {
     x: {
       grid: { display: false },
-      ticks: { color: '#cbd5e1', maxTicksLimit: 6 },
+      ticks: { color: '#a8a3b2', maxTicksLimit: 12, maxRotation: 0 },
     },
     y: {
-      grid: { color: 'rgba(148, 163, 184, 0.14)' },
+      grid: { color: 'rgba(220, 210, 230, 0.09)' },
       ticks: {
-        color: '#cbd5e1',
+        color: '#a8a3b2',
         maxTicksLimit: 5,
-        callback: (value: string | number) => formatAxisValue(Number(value), axisType),
+        callback: (value: string | number) => kind === 'percent' ? `${Number(value).toFixed(0)}%` : formatNumber(Number(value)),
       },
-      beginAtZero: false,
+      beginAtZero: kind === 'number',
+      ...(kind === 'percent' ? { suggestedMin: 85, suggestedMax: 100 } : {}),
     },
   },
 })
 
-const revenueChartOptions = createChartOptions('currency')
-const visitorsChartOptions = createChartOptions('number')
-const conversionsChartOptions = createChartOptions('percent')
-
-const selectedLabel = computed(() => selectedMonth.value === 'ALL' ? 'All months' : selectedMonth.value)
+const shipmentChartOptions = createChartOptions('number')
+const onTimeChartOptions = createChartOptions('percent')
+const selectedLabel = computed(() => selectedPeriod.value === 'ALL' ? 'Jan–Dec 2025' : `${selectedPeriod.value} 2025`)
 </script>
 
 <template>
   <v-app>
-    <v-app-bar color="#ff2bd6" flat class="border-b dashboard-app-bar" height="80">
-      <v-container class="d-flex align-center px-4" fluid>
-        <div class="text-h5 font-weight-bold">My Dashboard</div>
-        <v-spacer />
-        <v-select
-          v-model="selectedMonth"
-          :items="monthOptions"
-          item-title="title"
-          item-value="value"
-          variant="outlined"
-          hide-details
-          density="comfortable"
-          class="month-picker"
-          bg-color="#111827"
-          color="primary"
-        />
+    <v-app-bar color="#ff2bd6" flat class="border-b dashboard-app-bar" height="82">
+      <v-container class="app-bar-content" fluid>
+        <div class="brand-lockup">
+          <div class="brand-mark"><v-icon icon="mdi-truck-fast" size="22" /></div>
+          <div>
+            <div class="brand-name">FastForward Logistics</div>
+            <div class="brand-caption">OPERATIONS / LEADERSHIP REVIEW</div>
+          </div>
+        </div>
+
+        <div class="filters">
+          <div class="filter-box">
+            <span id="period-filter-label" class="filter-label">Reporting period</span>
+            <v-select
+              id="period-filter"
+              v-model="selectedPeriod"
+              :items="periodOptions"
+              item-title="title"
+              item-value="value"
+              aria-labelledby="period-filter-label"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="filter-select period-select"
+              bg-color="#111018"
+              color="primary"
+            />
+          </div>
+          <div class="filter-box">
+            <span id="region-filter-label" class="filter-label">Destination region</span>
+            <v-select
+              id="region-filter"
+              v-model="selectedRegion"
+              :items="regionOptions"
+              item-title="title"
+              item-value="value"
+              aria-labelledby="region-filter-label"
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="filter-select region-select"
+              bg-color="#111018"
+              color="primary"
+            />
+          </div>
+        </div>
       </v-container>
     </v-app-bar>
 
     <v-main>
       <v-container fluid class="dashboard-shell">
-        <div class="mb-4 text-body-1 text-medium-emphasis">Showing: {{ selectedLabel }}</div>
+        <header class="page-heading">
+          <div>
+            <div class="eyebrow"><span class="status-dot" /> NETWORK OPERATIONS <span class="eyebrow-divider">/</span> {{ selectedLabel }}</div>
+            <h1>Operations overview</h1>
+            <p>Shipment health, delivery performance, and active service risks.</p>
+          </div>
+          <div class="snapshot-label"><span class="snapshot-icon">2025</span><span>Sample performance review</span></div>
+        </header>
 
-        <v-row class="mb-5">
-          <v-col v-for="card in summaryCards" :key="card.label" cols="12" sm="6" md="3">
-            <v-card class="rounded-xl pa-3 metric-card" elevation="0">
-              <div class="d-flex justify-space-between align-center mb-2">
-                <span class="text-medium-emphasis text-subtitle-2">{{ card.label }}</span>
-                <v-icon :icon="card.icon" :color="card.color" size="22" />
+        <section class="kpi-grid" aria-label="Operations summary">
+          <v-card v-for="card in summaryCards" :key="card.label" class="metric-card" elevation="0" :class="`accent-${card.accent}`">
+            <div class="metric-topline">
+              <span>{{ card.label }}</span>
+              <v-icon :icon="card.icon" size="20" />
+            </div>
+            <div class="metric-value">{{ card.value }}</div>
+            <div class="metric-detail">{{ card.detail }}</div>
+          </v-card>
+        </section>
+
+        <section class="trend-grid" aria-label="Performance trends">
+          <v-card class="panel chart-panel" elevation="0">
+            <div class="panel-heading">
+              <div><h2>Shipment volume</h2><p>Shipments created · {{ selectedLabel }}</p></div>
+              <span class="chart-unit">LOADS</span>
+            </div>
+            <div class="chart-canvas"><Bar :data="shipmentChartData" :options="shipmentChartOptions" /></div>
+          </v-card>
+
+          <v-card class="panel chart-panel" elevation="0">
+            <div class="panel-heading">
+              <div><h2>On-time delivery</h2><p>Delivered by promised date · {{ selectedLabel }}</p></div>
+              <span class="chart-unit">RATE</span>
+            </div>
+            <div class="chart-canvas"><Line :data="onTimeChartData" :options="onTimeChartOptions" /></div>
+          </v-card>
+        </section>
+
+        <section class="detail-grid" aria-label="Regional performance and open exceptions">
+          <v-card class="panel region-panel" elevation="0">
+            <div class="panel-heading">
+              <div><h2>Regional performance</h2><p>Volume and on-time delivery by destination</p></div>
+              <span class="region-count">{{ regionPerformance.length }} REGIONS</span>
+            </div>
+
+            <div class="region-list">
+              <div v-for="region in regionPerformance" :key="region.name" class="region-row">
+                <div class="region-main">
+                  <div class="region-name">{{ region.name }}</div>
+                  <div class="region-stat"><strong>{{ formatNumber(region.shipments) }}</strong><span>shipments</span></div>
+                </div>
+                <div class="volume-track" role="img" :aria-label="`${region.name}: ${formatNumber(region.shipments)} shipments`">
+                  <span :style="{ width: `${(region.shipments / maxRegionShipments) * 100}%` }" />
+                </div>
+                <div class="region-rate-block">
+                  <strong>{{ formatPercent(region.onTimeRate) }}</strong>
+                  <span>on time</span>
+                </div>
+                <span class="rate-status" :class="region.onTimeRate >= 93 ? 'status-good' : region.onTimeRate >= 91 ? 'status-watch' : 'status-low'">
+                  {{ region.onTimeRate >= 93 ? 'At target' : region.onTimeRate >= 91 ? 'Watch' : 'Below target' }}
+                </span>
               </div>
+            </div>
+            <div class="region-footnote">On-time target: 93% · rate uses delivered shipments as denominator</div>
+          </v-card>
 
-              <div class="metric-value mb-1">{{ card.value }}</div>
+          <v-card class="panel exceptions-panel" elevation="0">
+            <div class="panel-heading exceptions-heading">
+              <div><h2>Open exceptions <span class="count-badge">{{ filteredExceptions.length }}</span></h2><p>Unresolved issues opened in {{ selectedLabel }}</p></div>
+              <v-select
+                v-model="exceptionSort"
+                :items="sortOptions"
+                item-title="title"
+                item-value="value"
+                aria-label="Sort exceptions"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="sort-select"
+              />
+            </div>
 
-              <div :class="['metric-trend', card.delta >= 0 ? 'positive' : 'negative']">
-                <v-icon :icon="card.delta >= 0 ? 'mdi-arrow-up' : 'mdi-arrow-down'" size="15" />
-                {{ Math.abs(card.delta).toFixed(1) }}% vs prior period
-              </div>
-            </v-card>
-          </v-col>
-        </v-row>
+            <div v-if="filteredExceptions.length" class="exception-table-wrap">
+              <table class="exception-table">
+                <thead>
+                  <tr><th>Shipment / issue</th><th>Region</th><th>Priority</th><th>Age</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in filteredExceptions" :key="item.id">
+                    <td>
+                      <div class="shipment-id">{{ item.shipmentId }}</div>
+                      <div class="issue-name">{{ item.issueType }}</div>
+                    </td>
+                    <td class="table-region">{{ item.region }}</td>
+                    <td><span class="priority-pill" :class="`priority-${item.priority.toLowerCase()}`">{{ item.priority }}</span></td>
+                    <td class="age-cell">{{ item.ageDays }}d</td>
+                    <td><span class="exception-status">{{ item.status }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="empty-state">
+              <v-icon icon="mdi-check-circle-outline" size="24" />
+              <strong>No open exceptions in this view</strong>
+              <span>Try another period or region.</span>
+            </div>
+          </v-card>
+        </section>
 
-        <v-row class="mb-5">
-          <v-col cols="12" md="6">
-            <v-card class="rounded-xl pa-3 chart-card" elevation="0">
-              <v-card-title class="px-0 pb-2">Revenue</v-card-title>
-              <Bar :data="revenueChartData" :options="revenueChartOptions" />
-            </v-card>
-          </v-col>
-
-          <v-col cols="12" md="6">
-            <v-card class="rounded-xl pa-3 chart-card" elevation="0">
-              <v-card-title class="px-0 pb-2">Visitors</v-card-title>
-              <Line :data="visitorsChartData" :options="visitorsChartOptions" />
-            </v-card>
-          </v-col>
-        </v-row>
-
-        <v-row>
-          <v-col cols="12">
-            <v-card class="rounded-xl pa-3 chart-card large-chart" elevation="0">
-              <v-card-title class="px-0 pb-2">Conversions</v-card-title>
-              <Line :data="conversionsChartData" :options="conversionsChartOptions" />
-            </v-card>
-          </v-col>
-        </v-row>
+        <footer class="dashboard-footer">
+          <span>FASTFORWARD LOGISTICS <span class="footer-separator">/</span> INTERNAL OPERATIONS</span>
+          <span>Fictional sample data · 2025</span>
+        </footer>
       </v-container>
     </v-main>
   </v-app>
