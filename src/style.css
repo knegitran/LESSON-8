@@ -1,0 +1,88 @@
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background: #020817;
+  color: #e2e8f0;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+body {
+  min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.v-application {
+  background: #020817;
+}
+
+.dashboard-shell {
+  max-width: 1280px;
+  padding: 22px 20px 32px;
+}
+
+.border-b {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.month-picker {
+  max-width: 200px;
+}
+
+.metric-card,
+.chart-card {
+  background: rgba(15, 23, 42, 0.84) !important;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: none !important;
+}
+
+.metric-value {
+  font-size: clamp(1.2rem, 1.8vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.metric-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.metric-trend.positive {
+  color: #4ade80;
+}
+
+.metric-trend.negative {
+  color: #f87171;
+}
+
+.chart-card {
+  min-height: 220px;
+}
+
+.large-chart {
+  min-height: 260px;
+}
+
+.v-card-title {
+  font-size: 0.98rem !important;
+  font-weight: 700 !important;
+  padding-bottom: 8px !important;
+}
+
+@media (max-width: 700px) {
+  .dashboard-shell {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .month-picker {
+    max-width: 150px;
+  }
+}
